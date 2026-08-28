@@ -53,7 +53,7 @@ def generate_and_validate_lesson(
     model_id: str = MODEL_ID,
     fallback_model_id: str = "gemini-2.5-flash",
     max_repair_attempts: int = 2,
-) -> tuple[str, dict, int]:
+) -> tuple[str, str | None, dict, int]:
     """
     Generuje lekcje i automatycznie naprawia ja, jesli walidacja wykryje
     naruszenia - wysyla liste bledow z powrotem do modelu i prosi o
@@ -61,27 +61,34 @@ def generate_and_validate_lesson(
     (np. przeciazony 3.7-flash) zawiedzie od razu, przelacza sie na
     fallback_model_id zanim w ogole zwroci wynik.
 
-    Zwraca (finalny_tekst, wynik_walidacji, ile_naprawek_wykonano).
+    WAZNE: walidacja dziala na tekscie OCZYSZCZONYM z linii
+    "MIEJSCE_AKCJI: ..." (patrz prompt_builder.extract_setting_from_text) -
+    inaczej ta linia sama wygenerowalaby falszywe naruszenia.
+
+    Zwraca (oczyszczony_tekst, wybrane_miejsce_lub_None, wynik_walidacji,
+    ile_naprawek_wykonano).
     """
     from validator import validate_generated_text
-    from prompt_builder import build_fix_prompt
+    from prompt_builder import build_fix_prompt, extract_setting_from_text
 
     try:
-        text = generate_lesson_text(api_key, prompt, model_id=model_id, max_retries=2, retry_delay=10.0)
+        raw_text = generate_lesson_text(api_key, prompt, model_id=model_id, max_retries=2, retry_delay=10.0)
         used_model = model_id
     except Exception:
-        text = generate_lesson_text(api_key, prompt, model_id=fallback_model_id, max_retries=2, retry_delay=10.0)
+        raw_text = generate_lesson_text(api_key, prompt, model_id=fallback_model_id, max_retries=2, retry_delay=10.0)
         used_model = fallback_model_id
 
-    result = validate_generated_text(text, language, known_lemmas, target_lemmas, min_target_occurrences)
+    cleaned_text, setting_name = extract_setting_from_text(raw_text)
+    result = validate_generated_text(cleaned_text, language, known_lemmas, target_lemmas, min_target_occurrences)
     attempts_used = 0
 
     while not result["ok"] and attempts_used < max_repair_attempts:
         fix_prompt = build_fix_prompt(
-            text, result["violations"], result["missing_targets"], min_target_occurrences
+            raw_text, result["violations"], result["missing_targets"], min_target_occurrences
         )
-        text = generate_lesson_text(api_key, fix_prompt, model_id=used_model, max_retries=2, retry_delay=10.0)
-        result = validate_generated_text(text, language, known_lemmas, target_lemmas, min_target_occurrences)
+        raw_text = generate_lesson_text(api_key, fix_prompt, model_id=used_model, max_retries=2, retry_delay=10.0)
+        cleaned_text, setting_name = extract_setting_from_text(raw_text)
+        result = validate_generated_text(cleaned_text, language, known_lemmas, target_lemmas, min_target_occurrences)
         attempts_used += 1
 
-    return text, result, attempts_used
+    return cleaned_text, setting_name, result, attempts_used

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS texts (
     language TEXT NOT NULL,
     content TEXT NOT NULL,
     target_words TEXT,
+    setting TEXT,
     date TEXT NOT NULL
 );
 
@@ -64,6 +65,13 @@ CREATE TABLE IF NOT EXISTS coverage_history (
 def connect(db_path: str = "marginalia.db") -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA)
+    # Migracja dla baz zalozonych przed dodaniem kolumny 'setting'
+    # (CREATE TABLE IF NOT EXISTS nie dodaje kolumn do istniejacej tabeli).
+    try:
+        conn.execute("ALTER TABLE texts ADD COLUMN setting TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # kolumna juz istnieje
     return conn
 
 
@@ -86,17 +94,27 @@ def log_coverage(conn, language: str, token_coverage: float, type_coverage: floa
     conn.commit()
 
 
-def save_text(conn, language: str, content: str, target_words: list[str] | None = None) -> None:
+def save_text(conn, language: str, content: str, target_words: list[str] | None = None,
+              setting: str | None = None) -> None:
     conn.execute(
-        "INSERT INTO texts (language, content, target_words, date) VALUES (?, ?, ?, ?)",
-        (language, content, json.dumps(target_words or []), date.today().isoformat()),
+        "INSERT INTO texts (language, content, target_words, setting, date) VALUES (?, ?, ?, ?, ?)",
+        (language, content, json.dumps(target_words or []), setting, date.today().isoformat()),
     )
     conn.commit()
 
 
+def get_used_settings(conn: sqlite3.Connection, language: str, limit: int = 15) -> list[str]:
+    """Ostatnio uzyte miejsca akcji (do przekazania modelowi, zeby ich unikal)."""
+    rows = conn.execute(
+        "SELECT setting FROM texts WHERE language = ? AND setting IS NOT NULL ORDER BY id DESC LIMIT ?",
+        (language, limit),
+    ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
 def get_recent_texts(conn: sqlite3.Connection, language: str, limit: int = 20) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, content, target_words, date FROM texts WHERE language = ? ORDER BY id DESC LIMIT ?",
+        "SELECT id, content, target_words, setting, date FROM texts WHERE language = ? ORDER BY id DESC LIMIT ?",
         (language, limit),
     ).fetchall()
     results = []
@@ -111,6 +129,7 @@ def get_recent_texts(conn: sqlite3.Connection, language: str, limit: int = 20) -
             "id": r[0],
             "content": r[1],
             "target_words": targets,
-            "date": r[3],
+            "setting": r[3],
+            "date": r[4],
         })
     return results

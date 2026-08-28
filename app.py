@@ -20,12 +20,11 @@ import streamlit as st
 
 from freq_source import WordfreqSource
 from coverage import pick_next_unknown_words, text_coverage
-from prompt_builder import build_gap_prompt, build_thriller_prompt, LANGUAGE_NAMES
+from prompt_builder import build_gap_prompt, build_thriller_prompt, extract_setting_from_text, LANGUAGE_NAMES
 from lemmatize import lemmatize
 from validator import validate_generated_text
-from registry import connect, save_text, log_coverage, get_recent_texts
+from registry import connect, save_text, log_coverage, get_recent_texts, get_used_settings
 from lingq_lesson_scan import scan_known_words, get_in_progress_lemmas
-from story_bible import SETTINGS
 
 st.set_page_config(
     page_title="Silnik i+1 - Nauka Jezykow",
@@ -341,22 +340,19 @@ with tab_gen:
                 st.caption("Brak poprzednich tekstow w bazie - rozpoczecie nowej historii.")
 
         if serial_mode:
-            st.markdown("**Miejsce akcji tego odcinka:**")
-            setting_options = SETTINGS.get(selected_lang, [])
-            if setting_options:
-                setting_labels = [s["miejsce"] for s in setting_options]
-                chosen_setting_label = st.selectbox(
-                    "Wybierz recznie albo zostaw losowanie:",
-                    ["(losuj automatycznie)"] + setting_labels,
-                    index=0,
+            db_path_for_settings = get_db_path(selected_lang)
+            used_settings_list = []
+            if db_path_for_settings.exists():
+                conn_s = connect(str(db_path_for_settings))
+                used_settings_list = get_used_settings(conn_s, selected_lang, limit=15)
+                conn_s.close()
+            if used_settings_list:
+                st.caption(
+                    "Miejsca juz odwiedzone (model unika ich automatycznie): "
+                    + ", ".join(used_settings_list)
                 )
-                if chosen_setting_label == "(losuj automatycznie)":
-                    chosen_setting = None
-                else:
-                    chosen_setting = next(s for s in setting_options if s["miejsce"] == chosen_setting_label)
             else:
-                st.caption(f"Brak zdefiniowanych miejsc dla jezyka {selected_lang} w story_bible.py.")
-                chosen_setting = None
+                st.caption("Brak jeszcze odwiedzonych miejsc - model sam wybierze pierwsze.")
         else:
             # Tryb klasyczny (bez fabuly) - stary UI tematu
             st.markdown("**Temat lekcji:**")
@@ -412,7 +408,7 @@ with tab_gen:
                         in_progress_lemmas=in_progress,
                         min_target_occurrences=min_occ,
                         length_hint=length_hint,
-                        setting=chosen_setting,
+                        used_settings=used_settings_list,
                         previous_context=prev_context,
                     )
                     chosen_topic = None
@@ -438,12 +434,15 @@ with tab_gen:
                 with st.spinner("Gemini pisze i w razie potrzeby poprawia odcinek (moze to potrwac do minuty)..."):
                     try:
                         from gemini_client import generate_and_validate_lesson
-                        generated_text, auto_result, repairs = generate_and_validate_lesson(
+                        cleaned_text, extracted_setting, auto_result, repairs = generate_and_validate_lesson(
                             gemini_key, prompt, selected_lang, known_lemmas, target_lemmas,
                             min_target_occurrences=min_occ,
                         )
-                        st.session_state[f"response_area_{selected_lang}"] = generated_text
+                        st.session_state[f"response_area_{selected_lang}"] = cleaned_text
+                        st.session_state[f"extracted_setting_{selected_lang}"] = extracted_setting
                         st.session_state[f"auto_validate_{selected_lang}"] = True
+                        if extracted_setting:
+                            st.caption(f"Miejsce akcji wybrane przez model: **{extracted_setting}**")
                         if repairs > 0:
                             st.info(f"Model potrzebowal {repairs} automatycznej/-ych poprawki/poprawek.")
                         if not auto_result["ok"]:
@@ -496,10 +495,16 @@ with tab_gen:
         else:
             targets = st.session_state.get(f"target_lemmas_{selected_lang}", [])
             min_o = st.session_state.get(f"min_occ_{selected_lang}", 2)
-            
+
+            # Wyciagnij "MIEJSCE_AKCJI: ..." jesli jest (np. z recznie wklejonej
+            # odpowiedzi z innego modelu) - inaczej ta linia falszywie zaliczylaby
+            # sie jako naruszenie slownictwa. W trybie auto tekst jest juz czysty.
+            cleaned_response, pasted_setting = extract_setting_from_text(response_text)
+            final_setting = pasted_setting or st.session_state.get(f"extracted_setting_{selected_lang}")
+
             with st.spinner("Analiza lematyzacyjna i sprawdzanie ograniczen leksykalnych..."):
                 val_res = validate_generated_text(
-                    text=response_text,
+                    text=cleaned_response,
                     language=selected_lang,
                     allowed_lemmas=known_lemmas,
                     target_lemmas=targets,
@@ -513,10 +518,10 @@ with tab_gen:
             if val_res["ok"]:
                 st.success("✅ Tekst w 100% zgodny z ograniczeniami leksykalnymi i+1!")
                 conn = connect(str(get_db_path(selected_lang)))
-                save_text(conn, selected_lang, response_text, targets)
+                save_text(conn, selected_lang, cleaned_response, targets, setting=final_setting)
                 
                 # Obliczenie i zalogowanie pokrycia
-                text_lemmas = lemmatize(response_text, selected_lang)
+                text_lemmas = lemmatize(cleaned_response, selected_lang)
                 cov = text_coverage(text_lemmas, known_lemmas | set(targets))
                 log_coverage(conn, selected_lang, cov["token_coverage"], cov["type_coverage"], sample_size=cov["sample_size"])
                 conn.close()
@@ -555,7 +560,7 @@ with tab_gen:
                 # Opcjonalny wymuszony zapis
                 if st.button("⚠️ Zapisz mimo ostrzezen (force save)"):
                     conn = connect(str(get_db_path(selected_lang)))
-                    save_text(conn, selected_lang, response_text, targets)
+                    save_text(conn, selected_lang, cleaned_response, targets, setting=final_setting)
                     conn.close()
                     st.warning("Tekst zostal zapisany na wyrazne zadanie.")
 
@@ -581,7 +586,9 @@ with tab_history:
             for item in texts:
                 date_str = item.get("date", "Brak daty")
                 t_words = ", ".join(item.get("target_words", [])) or "Brak"
-                with st.expander(f"📖 Lekcja #{item['id']} - {date_str} (Target words: {t_words})"):
+                setting_label = item.get("setting") or "nieznane"
+                with st.expander(f"📖 Lekcja #{item['id']} - {date_str} - {setting_label}"):
+                    st.markdown(f"**Miejsce akcji:** {setting_label}")
                     st.markdown(f"**Target words:** `{t_words}`")
                     st.text_area("Tresc lekcji:", value=item["content"], height=160, key=f"hist_{item['id']}")
 

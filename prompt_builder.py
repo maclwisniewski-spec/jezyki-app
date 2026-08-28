@@ -54,17 +54,6 @@ wystapien kazdego - to zostanie zweryfikowane skryptem, wiec podaj rzetelnie.
 """
 
 
-def pick_setting(language: str, exclude: str | None = None) -> dict | None:
-    """Losuje jedno miejsce (z faktami) z story_bible.SETTINGS, unikajac ostatnio uzytego."""
-    import random
-    from story_bible import SETTINGS
-    options = SETTINGS.get(language, [])
-    if not options:
-        return None
-    candidates = [s for s in options if s["miejsce"] != exclude] or options
-    return random.choice(candidates)
-
-
 def build_thriller_prompt(
     known_lemmas: list[str],
     target_lemmas: list[str],
@@ -72,30 +61,34 @@ def build_thriller_prompt(
     in_progress_lemmas: list[str] | None = None,
     min_target_occurrences: int = 2,
     length_hint: str = "500-800 slow",
-    setting: dict | None = None,
+    used_settings: list[str] | None = None,
     previous_context: str | None = None,
 ) -> str:
     """
     Wersja build_gap_prompt osadzona w powtarzalnej fabule (Maciek + Damian,
-    thriller w stylu Dana Browna, realne miejsca z faktami z story_bible.py).
-    Trzy poziomy slownictwa: known (swobodnie), in_progress (gdzieniegdzie,
-    bez wymogu powtorzen), target (nowe, min. N powtorzen kazde).
+    thriller w stylu Dana Browna). Miejsce akcji NIE jest z gory ustalone -
+    model sam wybiera dowolne prawdziwe miejsce w ramach kraju/ow
+    wlasciwych dla danego jezyka, unikajac used_settings (poprzednio
+    odwiedzonych miejsc z historii). Trzy poziomy slownictwa: known
+    (swobodnie), in_progress (gdzieniegdzie, bez wymogu powtorzen), target
+    (nowe, min. N powtorzen kazde).
     """
-    from story_bible import CHARACTERS, GENRE_INSTRUCTIONS
-
-    if setting is None:
-        setting = pick_setting(language)
+    from story_bible import CHARACTERS, GENRE_INSTRUCTIONS, COUNTRY_HINTS
 
     known_str = ", ".join(sorted(known_lemmas))
     target_str = ", ".join(target_lemmas)
     in_progress_lemmas = in_progress_lemmas or []
     in_progress_str = ", ".join(in_progress_lemmas)
     lang_name = LANGUAGE_NAMES.get(language, language)
+    country_hint = COUNTRY_HINTS.get(language, "")
 
-    setting_block = ""
-    if setting:
-        fakty_str = "; ".join(setting["fakty"])
-        setting_block = f"\nMiejsce akcji: {setting['miejsce']}\nFakty do wplecenia: {fakty_str}\n"
+    geography_block = f"\nZasieg geograficzny: {country_hint}.\n" if country_hint else ""
+    used_settings = used_settings or []
+    avoid_block = (
+        f"Miejsca juz odwiedzone w poprzednich odcinkach (WYBIERZ COS INNEGO): "
+        f"{'; '.join(used_settings)}\n"
+        if used_settings else ""
+    )
 
     continuity_block = (
         f"\nKONTYNUACJA: to kolejny odcinek tej samej historii. Ostatnio "
@@ -117,7 +110,7 @@ def build_thriller_prompt(
 {CHARACTERS}
 
 {GENRE_INSTRUCTIONS}
-{setting_block}{continuity_block}
+{geography_block}{avoid_block}{continuity_block}
 FORMA: proza narracyjna (jak w powiesci), NIE scenariusz filmowy. Zero
 didaskaliow, opisow scen typu "INT./EXT.", nazw scen, ani imion pisanych
 WIELKIMI LITERAMI przed kwestiami dialogowymi - dialogi wplataj naturalnie
@@ -133,8 +126,23 @@ TWARDE OGRANICZENIE LEKSYKALNE (nieprzestrzeganie = tekst odrzucony):
 - Dlugosc: {length_hint}.
 
 Po tekscie dodaj sekcje "TARGET WORDS USED" z lista nowych slow (nie
-liczac slow "w trakcie nauki") i liczba wystapien kazdego.
+liczac slow "w trakcie nauki") i liczba wystapien kazdego. Pamietaj tez o
+linii "MIEJSCE_AKCJI: ..." opisanej wyzej w instrukcjach gatunkowych.
 """
+
+
+def extract_setting_from_text(text: str) -> tuple[str, str | None]:
+    """
+    Wyciaga linie 'MIEJSCE_AKCJI: ...' z konca wygenerowanego tekstu.
+    Zwraca (tekst_bez_tej_linii, nazwa_miejsca_albo_None).
+    """
+    import re
+    match = re.search(r"MIEJSCE_AKCJI:\s*(.+)", text)
+    if not match:
+        return text, None
+    setting_name = match.group(1).strip()
+    cleaned = text[:match.start()].rstrip()
+    return cleaned, setting_name
 
 
 def build_fix_prompt(previous_text: str, violations: dict[str, int], missing_targets: list[str],
@@ -160,7 +168,9 @@ def build_fix_prompt(previous_text: str, violations: dict[str, int], missing_tar
         "kazde niedozwolone slowo synonimem z dozwolonej listy albo "
         "przeformuluj zdanie tak, zeby go uniknac. Pamietaj o wszystkich "
         "pierwotnych ograniczeniach (tylko known_words + target_words, "
-        "min. wystapien kazdego target worda, proza a nie scenariusz).\n\n"
+        "min. wystapien kazdego target worda, proza a nie scenariusz). "
+        "Jesli poprzedni tekst konczyl sie linia \"MIEJSCE_AKCJI: ...\", "
+        "zachowaj ja BEZ ZMIAN na koncu nowej wersji.\n\n"
         f"Oto poprzedni tekst do poprawy:\n\n{previous_text}"
     )
     return "".join(parts)
