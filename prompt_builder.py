@@ -6,6 +6,14 @@ nastepnego pasma frekwencyjnego (target_words), kazde min. K razy.
 Wspiera temat/tlo fabularne oraz kontynuacje poprzedniej historii.
 """
 from __future__ import annotations
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent.resolve()
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from story_bible import CHARACTERS, GENRE_INSTRUCTIONS, COUNTRY_HINTS
 
 LANGUAGE_NAMES = {
     "de": "niemiecki",
@@ -73,8 +81,6 @@ def build_thriller_prompt(
     (swobodnie), in_progress (gdzieniegdzie, bez wymogu powtorzen), target
     (nowe, min. N powtorzen kazde).
     """
-    from story_bible import CHARACTERS, GENRE_INSTRUCTIONS, COUNTRY_HINTS
-
     known_str = ", ".join(sorted(known_lemmas))
     target_str = ", ".join(target_lemmas)
     in_progress_lemmas = in_progress_lemmas or []

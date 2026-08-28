@@ -9,7 +9,13 @@ przeciazone (503 UNAVAILABLE) lub zwracaja pusta odpowiedz - stad
 wbudowane ponawianie z odczekaniem i fallback na stabilniejszy model.
 """
 from __future__ import annotations
+import sys
 import time
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent.resolve()
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 MODEL_ID = "gemini-3.7-flash"
 

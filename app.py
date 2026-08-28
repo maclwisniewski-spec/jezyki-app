@@ -12,9 +12,15 @@ import os
 import random
 import re
 import sqlite3
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+# Gwarancja dostepnosci modulow lokalnych na Streamlit Cloud
+BASE_DIR = Path(__file__).parent.resolve()
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 import streamlit as st
 
