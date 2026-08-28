@@ -227,6 +227,13 @@ with st.sidebar.expander("✨ Automatyczne generowanie (Gemini)", expanded=False
         if gemini_input != st.session_state.get("custom_gemini_api_key", ""):
             st.session_state["custom_gemini_api_key"] = gemini_input
 
+    selected_gemini_model = st.selectbox(
+        "Model Gemini:",
+        options=["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash", "gemini-2.5-pro"],
+        index=0,
+        help="gemini-2.5-flash i 2.0-flash sa stabilne i maja bezplatny Free Tier w AI Studio.",
+    )
+
     gemini_key_available = bool(get_gemini_api_key())
     st.caption(
         "✅ Klucz ustawiony - dostepny przycisk automatycznego generowania."
@@ -443,6 +450,7 @@ with tab_gen:
                         cleaned_text, extracted_setting, auto_result, repairs = generate_and_validate_lesson(
                             gemini_key, prompt, selected_lang, known_lemmas, target_lemmas,
                             min_target_occurrences=min_occ,
+                            model_id=selected_gemini_model,
                         )
                         st.session_state[f"response_area_{selected_lang}"] = cleaned_text
                         st.session_state[f"extracted_setting_{selected_lang}"] = extracted_setting

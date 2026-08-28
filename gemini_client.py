@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-MODEL_ID = "gemini-3.7-flash"
+MODEL_ID = "gemini-2.5-flash"
 
 
 def generate_lesson_text(api_key: str, prompt: str, model_id: str = MODEL_ID,
