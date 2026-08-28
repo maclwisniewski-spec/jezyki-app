@@ -20,11 +20,12 @@ import streamlit as st
 
 from freq_source import WordfreqSource
 from coverage import pick_next_unknown_words, text_coverage
-from prompt_builder import build_gap_prompt, LANGUAGE_NAMES
+from prompt_builder import build_gap_prompt, build_thriller_prompt, LANGUAGE_NAMES
 from lemmatize import lemmatize
 from validator import validate_generated_text
 from registry import connect, save_text, log_coverage, get_recent_texts
-from lingq_lesson_scan import scan_known_words
+from lingq_lesson_scan import scan_known_words, get_in_progress_lemmas
+from story_bible import SETTINGS
 
 st.set_page_config(
     page_title="Silnik i+1 - Nauka Jezykow",
@@ -278,15 +279,14 @@ with tab_gen:
             min_occ = st.slider("Min. powtorzen per target word:", min_value=1, max_value=4, value=2)
             
         with col_cfg2:
-            text_type = st.selectbox(
-                "Typ tekstu:",
-                ["krotkie opowiadanie", "dialog miedzy dwoma bohaterami", "artykul publicystyczny", "wpis na blogu"],
-                index=0,
-            )
             length_hint = st.selectbox(
                 "Dlugosc tekstu:",
-                ["150-250 slow", "100-150 slow", "250-350 slow", "350-500 slow"],
+                ["500-800 slow", "800-1200 slow", "1200-1500 slow", "1500-2000 slow"],
                 index=0,
+            )
+            serial_mode = st.checkbox(
+                "Tryb serialu (Maciek i Damian, thriller)", value=True,
+                help="Wylacz, zeby wrocic do prostego, niefabularnego cwiczenia i+1.",
             )
 
         with col_cfg3:
@@ -297,17 +297,35 @@ with tab_gen:
             elif continue_story:
                 st.caption("Brak poprzednich tekstow w bazie - rozpoczecie nowej historii.")
 
-        # Tematyka
-        st.markdown("**Temat lekcji:**")
-        col_t1, col_t2 = st.columns([3, 1])
-        with col_t1:
-            custom_topic = st.text_input(
-                "Wlasny temat (opcjonalny, pozostaw puste dla losowania z persony):",
-                placeholder="np. szpiegostwo w Berlinie Zachodnim lub kulisy meczu",
-            )
-        with col_t2:
-            auto_topic = pick_topic(selected_lang)
-            st.caption(f"Wylosowany temat domyslny:\n**{auto_topic or 'Brak pliku themes'}**")
+        if serial_mode:
+            st.markdown("**Miejsce akcji tego odcinka:**")
+            setting_options = SETTINGS.get(selected_lang, [])
+            if setting_options:
+                setting_labels = [s["miejsce"] for s in setting_options]
+                chosen_setting_label = st.selectbox(
+                    "Wybierz recznie albo zostaw losowanie:",
+                    ["(losuj automatycznie)"] + setting_labels,
+                    index=0,
+                )
+                if chosen_setting_label == "(losuj automatycznie)":
+                    chosen_setting = None
+                else:
+                    chosen_setting = next(s for s in setting_options if s["miejsce"] == chosen_setting_label)
+            else:
+                st.caption(f"Brak zdefiniowanych miejsc dla jezyka {selected_lang} w story_bible.py.")
+                chosen_setting = None
+        else:
+            # Tryb klasyczny (bez fabuly) - stary UI tematu
+            st.markdown("**Temat lekcji:**")
+            col_t1, col_t2 = st.columns([3, 1])
+            with col_t1:
+                custom_topic = st.text_input(
+                    "Wlasny temat (opcjonalny, pozostaw puste dla losowania):",
+                    placeholder="np. szpiegostwo w Berlinie Zachodnim lub kulisy meczu",
+                )
+            with col_t2:
+                auto_topic = pick_topic(selected_lang)
+                st.caption(f"Wylosowany temat domyslny:\n**{auto_topic or 'Brak pliku themes'}**")
 
     # Przycisk generowania
     col_btn, _ = st.columns([1, 3])
@@ -323,17 +341,40 @@ with tab_gen:
                 target_lemmas = pick_next_unknown_words(
                     src, known_lemmas, selected_lang, n=n_target
                 )
-                chosen_topic = custom_topic.strip() if custom_topic.strip() else auto_topic
-                prompt = build_gap_prompt(
-                    known_lemmas=list(known_lemmas),
-                    target_lemmas=target_lemmas,
-                    language=selected_lang,
-                    min_target_occurrences=min_occ,
-                    text_type=text_type,
-                    length_hint=length_hint,
-                    topic=chosen_topic,
-                    previous_context=prev_context,
-                )
+
+                if serial_mode:
+                    api_key_for_scan = get_lingq_api_key()
+                    in_progress = []
+                    if api_key_for_scan:
+                        try:
+                            in_progress = get_in_progress_lemmas(
+                                api_key_for_scan, selected_lang, selected_lang,
+                                exclude_lemmas=known_lemmas | set(target_lemmas), n=6,
+                            )
+                        except Exception:
+                            in_progress = []
+                    prompt = build_thriller_prompt(
+                        known_lemmas=list(known_lemmas),
+                        target_lemmas=target_lemmas,
+                        language=selected_lang,
+                        in_progress_lemmas=in_progress,
+                        min_target_occurrences=min_occ,
+                        length_hint=length_hint,
+                        setting=chosen_setting,
+                        previous_context=prev_context,
+                    )
+                    chosen_topic = None
+                else:
+                    chosen_topic = custom_topic.strip() if custom_topic.strip() else auto_topic
+                    prompt = build_gap_prompt(
+                        known_lemmas=list(known_lemmas),
+                        target_lemmas=target_lemmas,
+                        language=selected_lang,
+                        min_target_occurrences=min_occ,
+                        length_hint=length_hint,
+                        topic=chosen_topic,
+                        previous_context=prev_context,
+                    )
 
                 st.session_state[f"prompt_{selected_lang}"] = prompt
                 st.session_state[f"target_lemmas_{selected_lang}"] = target_lemmas

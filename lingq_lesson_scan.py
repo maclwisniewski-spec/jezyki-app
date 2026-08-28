@@ -73,6 +73,45 @@ def scan_known_lemmas(api_key: str, language_code: str, spacy_lang_code: str, **
     return lemmas
 
 
+def get_in_progress_terms(api_key: str, language_code: str) -> set[str]:
+    """
+    Slowa "w trakcie nauki" na LingQ (juz widziane/podkreslone, ale jeszcze
+    NIE 'known') - endpoint /cards/, status 0-3. W przeciwienstwie do
+    known words (ktore trzeba skanowac przez lekcje), te sa tu bezposrednio.
+    """
+    headers = {"Authorization": f"Token {api_key}"}
+    url = f"{API_BASE.format(lang=language_code)}/cards"
+    terms: set[str] = set()
+    while url:
+        resp = requests.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        for c in data.get("results", []):
+            if c.get("status") in (0, 1, 2, 3):
+                terms.add(c.get("term", "").lower())
+        url = data.get("next")
+    return terms
+
+
+def get_in_progress_lemmas(api_key: str, language_code: str, spacy_lang_code: str,
+                            exclude_lemmas: set[str] | None = None, n: int = 6) -> list[str]:
+    """
+    Losowa probka n lematow "w trakcie nauki" - do wplecenia gdzieniegdzie
+    w tekst, bez wymogu min. liczby wystapien. exclude_lemmas to zwykle
+    known_lemmas + target_lemmas (zeby nie dublowac roli slowa).
+    """
+    import random
+    from lemmatize import lemmatize
+
+    exclude_lemmas = exclude_lemmas or set()
+    terms = get_in_progress_terms(api_key, language_code)
+    lemmas: set[str] = set()
+    for w in terms:
+        lemmas.update(lemmatize(w, spacy_lang_code))
+    candidates = sorted(lemmas - exclude_lemmas)
+    return random.sample(candidates, min(n, len(candidates)))
+
+
 if __name__ == "__main__":
     import sys
     import json
