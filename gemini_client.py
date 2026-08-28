@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-MODEL_ID = "gemini-2.5-flash"
+MODEL_ID = "gemini-3.6-flash"
 
 
 def generate_lesson_text(api_key: str, prompt: str, model_id: str = MODEL_ID,
@@ -57,7 +57,7 @@ def generate_and_validate_lesson(
     target_lemmas: list,
     min_target_occurrences: int = 2,
     model_id: str = MODEL_ID,
-    fallback_model_id: str = "gemini-2.5-flash",
+    fallback_model_id: str = "gemini-3.1-flash-lite",
     max_repair_attempts: int = 2,
 ) -> tuple[str, str | None, dict, int]:
     """

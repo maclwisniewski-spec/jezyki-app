@@ -229,9 +229,9 @@ with st.sidebar.expander("✨ Automatyczne generowanie (Gemini)", expanded=False
 
     selected_gemini_model = st.selectbox(
         "Model Gemini:",
-        options=["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash", "gemini-2.5-pro"],
+        options=["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.1-flash-lite"],
         index=0,
-        help="gemini-2.5-flash i 2.0-flash sa stabilne i maja bezplatny Free Tier w AI Studio.",
+        help="gemini-3.6-flash jest domyslnym, najszybszym i stabilnym modelem z bezplatnym Free Tier w AI Studio.",
     )
 
     gemini_key_available = bool(get_gemini_api_key())
