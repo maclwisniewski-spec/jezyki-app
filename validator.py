@@ -17,6 +17,7 @@ def validate_generated_text(
     target_lemmas: list[str],
     min_target_occurrences: int = 2,
     functors_exempt: bool = True,
+    propn_exempt: bool = True,
 ) -> dict:
     allowed = allowed_lemmas | set(target_lemmas)
     tagged = lemmatize_with_pos(text, language)
@@ -27,7 +28,10 @@ def validate_generated_text(
     for lemma, pos in tagged:
         lemma_counts[lemma] += 1
         is_functor = functors_exempt and pos in FUNCTOR_POS
-        if lemma not in allowed and not is_functor:
+        # Nazwy wlasne (bohaterowie, miejsca akcji) nie sa "slownictwem do
+        # nauki" - zawsze beda sie pojawiac, bez wzgledu na known_words.
+        is_propn = propn_exempt and pos == "PROPN"
+        if lemma not in allowed and not is_functor and not is_propn:
             violations[lemma] += 1
 
     target_coverage = {t: lemma_counts.get(t, 0) for t in target_lemmas}

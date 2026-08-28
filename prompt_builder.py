@@ -118,14 +118,49 @@ def build_thriller_prompt(
 
 {GENRE_INSTRUCTIONS}
 {setting_block}{continuity_block}
+FORMA: proza narracyjna (jak w powiesci), NIE scenariusz filmowy. Zero
+didaskaliow, opisow scen typu "INT./EXT.", nazw scen, ani imion pisanych
+WIELKIMI LITERAMI przed kwestiami dialogowymi - dialogi wplataj naturalnie
+w tekst narracyjny (np. Damian powiedzial: "...").
+
 TWARDE OGRANICZENIE LEKSYKALNE (nieprzestrzeganie = tekst odrzucony):
 - Uzywaj WYLACZNIE slow z tej listy (w dowolnej odmianie gramatycznej): {known_str}
 - Rodzajniki, zaimki, spojniki i przyimki podstawowe mozesz uzywac swobodnie.
 - Dodatkowo MUSISZ uzyc kazdego z tych {len(target_lemmas)} NOWYCH slow co
   najmniej {min_target_occurrences} razy, w roznych kontekstach: {target_str}
-{in_progress_block}- Nie wprowadzaj zadnego innego slowa tresciowego spoza tych list.
+{in_progress_block}- Nie wprowadzaj zadnego innego slowa tresciowego spoza tych list (nazwy
+  wlasne - imiona bohaterow, nazwy miejsc - sa dozwolone bez ograniczen).
 - Dlugosc: {length_hint}.
 
 Po tekscie dodaj sekcje "TARGET WORDS USED" z lista nowych slow (nie
 liczac slow "w trakcie nauki") i liczba wystapien kazdego.
 """
+
+
+def build_fix_prompt(previous_text: str, violations: dict[str, int], missing_targets: list[str],
+                      min_target_occurrences: int = 2) -> str:
+    """
+    Buduje prompt naprawczy do wyslania modelowi, ktory nie utrzymal
+    ograniczen leksykalnych za pierwszym razem. Uzywany zarowno w petli
+    automatycznej (gemini_client.generate_and_validate_lesson) jak i w
+    UI do recznej poprawki w innym modelu.
+    """
+    parts = [
+        "Twoj poprzedni tekst zawieral nastepujace naruszenia ograniczen leksykalnych:\n",
+    ]
+    if violations:
+        parts.append(f"- Uzyto slow spoza dozwolonej listy: {list(violations.keys())}\n")
+    if missing_targets:
+        parts.append(
+            f"- Zbyt malo wystapien wymaganych target words (min. {min_target_occurrences} kazde): {missing_targets}\n"
+        )
+    parts.append(
+        "\nPrzepisz CALY tekst od nowa, zachowujac te sama fabule, bohaterow i "
+        "miejsce akcji, ale usuwajac WSZYSTKIE powyzsze naruszenia - zastap "
+        "kazde niedozwolone slowo synonimem z dozwolonej listy albo "
+        "przeformuluj zdanie tak, zeby go uniknac. Pamietaj o wszystkich "
+        "pierwotnych ograniczeniach (tylko known_words + target_words, "
+        "min. wystapien kazdego target worda, proza a nie scenariusz).\n\n"
+        f"Oto poprzedni tekst do poprawy:\n\n{previous_text}"
+    )
+    return "".join(parts)

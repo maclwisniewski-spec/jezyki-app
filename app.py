@@ -148,6 +148,17 @@ def get_lingq_api_key() -> str:
     return st.session_state.get("custom_lingq_api_key", "")
 
 
+def get_gemini_api_key() -> str:
+    # 1. Sprawdz st.secrets
+    try:
+        if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+            return st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+    # 2. Sprawdz session_state
+    return st.session_state.get("custom_gemini_api_key", "")
+
+
 # ==============================================================================
 # Pasek boczny: Wybor jezyka i status slownictwa
 # ==============================================================================
@@ -185,6 +196,38 @@ if db_path.exists():
     except Exception:
         lesson_count = 0
 st.sidebar.metric("Ukonczone lekcje w bazie", lesson_count)
+
+# ==============================================================================
+# Panel boczny: Klucz Gemini (generowanie automatyczne)
+# ==============================================================================
+
+st.sidebar.markdown("---")
+with st.sidebar.expander("✨ Automatyczne generowanie (Gemini)", expanded=False):
+    has_gemini_secret = False
+    try:
+        if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+            has_gemini_secret = True
+    except Exception:
+        pass
+
+    if has_gemini_secret:
+        st.caption("🔑 Klucz API wczytany z konfiguracji Secrets.")
+    else:
+        gemini_input = st.text_input(
+            "Klucz API Gemini:",
+            value=st.session_state.get("custom_gemini_api_key", ""),
+            type="password",
+            help="Pobierz klucz z: https://aistudio.google.com/apikey",
+        )
+        if gemini_input != st.session_state.get("custom_gemini_api_key", ""):
+            st.session_state["custom_gemini_api_key"] = gemini_input
+
+    gemini_key_available = bool(get_gemini_api_key())
+    st.caption(
+        "✅ Klucz ustawiony - dostepny przycisk automatycznego generowania."
+        if gemini_key_available
+        else "Brak klucza - dostepne bedzie tylko generowanie recznego promptu."
+    )
 
 # ==============================================================================
 # Panel boczny: Synchronizacja z LingQ
@@ -328,11 +371,20 @@ with tab_gen:
                 st.caption(f"Wylosowany temat domyslny:\n**{auto_topic or 'Brak pliku themes'}**")
 
     # Przycisk generowania
-    col_btn, _ = st.columns([1, 3])
-    with col_btn:
+    col_btn1, col_btn2, _ = st.columns([1.3, 1.3, 2])
+    with col_btn1:
         generate_clicked = st.button("✨ Generuj prompt lekcji", type="primary", use_container_width=True)
+    with col_btn2:
+        gemini_ready = bool(get_gemini_api_key())
+        generate_auto_clicked = st.button(
+            "🚀 Generuj i zapisz automatycznie (Gemini)",
+            type="primary" if gemini_ready else "secondary",
+            use_container_width=True,
+            disabled=not gemini_ready,
+            help=None if gemini_ready else "Ustaw klucz API Gemini w panelu bocznym, zeby odblokowac ten przycisk.",
+        )
 
-    if generate_clicked:
+    if generate_clicked or generate_auto_clicked:
         if len(known_lemmas) == 0:
             st.error("Nie mozna wygenerowac lekcji bez listy znanych slow. Pobierz slowa z LingQ.")
         else:
@@ -381,6 +433,27 @@ with tab_gen:
                 st.session_state[f"min_occ_{selected_lang}"] = min_occ
                 st.session_state[f"chosen_topic_{selected_lang}"] = chosen_topic
 
+            if generate_auto_clicked:
+                gemini_key = get_gemini_api_key()
+                with st.spinner("Gemini pisze i w razie potrzeby poprawia odcinek (moze to potrwac do minuty)..."):
+                    try:
+                        from gemini_client import generate_and_validate_lesson
+                        generated_text, auto_result, repairs = generate_and_validate_lesson(
+                            gemini_key, prompt, selected_lang, known_lemmas, target_lemmas,
+                            min_target_occurrences=min_occ,
+                        )
+                        st.session_state[f"response_area_{selected_lang}"] = generated_text
+                        st.session_state[f"auto_validate_{selected_lang}"] = True
+                        if repairs > 0:
+                            st.info(f"Model potrzebowal {repairs} automatycznej/-ych poprawki/poprawek.")
+                        if not auto_result["ok"]:
+                            st.warning(
+                                "Nawet po automatycznych poprawkach tekst wciaz ma naruszenia - "
+                                "zobacz szczegoly w sekcji walidacji ponizej."
+                            )
+                    except Exception as e:
+                        st.error(f"Blad generowania przez Gemini: {e}")
+
     # Wyswietlanie wygenerowanego promptu
     prompt_key = f"prompt_{selected_lang}"
     if prompt_key in st.session_state:
@@ -408,11 +481,14 @@ with tab_gen:
         "Wklej wygenerowany tekst z modelu:",
         height=220,
         placeholder="Wklej tutaj tekst wygenerowany przez Claude / ChatGPT / Gemini...",
+        key=f"response_area_{selected_lang}",
     )
 
     col_v1, col_v2 = st.columns([1, 3])
     with col_v1:
         validate_clicked = st.button("🧪 Zwaliduj i zapisz", type="primary", use_container_width=True)
+
+    validate_clicked = validate_clicked or st.session_state.pop(f"auto_validate_{selected_lang}", False)
 
     if validate_clicked:
         if not response_text.strip():
