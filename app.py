@@ -447,7 +447,7 @@ with tab_gen:
                 with st.spinner("Gemini pisze i w razie potrzeby poprawia odcinek (moze to potrwac do minuty)..."):
                     try:
                         from gemini_client import generate_and_validate_lesson
-                        cleaned_text, extracted_setting, auto_result, repairs = generate_and_validate_lesson(
+                        cleaned_text, extracted_setting, auto_result, repairs, used_model = generate_and_validate_lesson(
                             gemini_key, prompt, selected_lang, known_lemmas, target_lemmas,
                             min_target_occurrences=min_occ,
                             model_id=selected_gemini_model,
@@ -455,6 +455,8 @@ with tab_gen:
                         st.session_state[f"response_area_{selected_lang}"] = cleaned_text
                         st.session_state[f"extracted_setting_{selected_lang}"] = extracted_setting
                         st.session_state[f"auto_validate_{selected_lang}"] = True
+                        if used_model != selected_gemini_model:
+                            st.info(f"Model {selected_gemini_model} byl przeciazony - automatycznie uzyto {used_model}.")
                         if extracted_setting:
                             st.caption(f"Miejsce akcji wybrane przez model: **{extracted_setting}**")
                         if repairs > 0:
