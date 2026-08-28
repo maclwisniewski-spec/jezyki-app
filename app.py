@@ -446,12 +446,19 @@ with tab_gen:
                 gemini_key = get_gemini_api_key()
                 with st.spinner("Gemini pisze i w razie potrzeby poprawia odcinek (moze to potrwac do minuty)..."):
                     try:
-                        from gemini_client import generate_and_validate_lesson
-                        cleaned_text, extracted_setting, auto_result, repairs, used_model = generate_and_validate_lesson(
+                        import gemini_client
+                        import importlib
+                        importlib.reload(gemini_client)
+                        gen_output = gemini_client.generate_and_validate_lesson(
                             gemini_key, prompt, selected_lang, known_lemmas, target_lemmas,
                             min_target_occurrences=min_occ,
                             model_id=selected_gemini_model,
                         )
+                        if len(gen_output) == 5:
+                            cleaned_text, extracted_setting, auto_result, repairs, used_model = gen_output
+                        else:
+                            cleaned_text, extracted_setting, auto_result, repairs = gen_output
+                            used_model = selected_gemini_model
                         st.session_state[f"response_area_{selected_lang}"] = cleaned_text
                         st.session_state[f"extracted_setting_{selected_lang}"] = extracted_setting
                         st.session_state[f"auto_validate_{selected_lang}"] = True
