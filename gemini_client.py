@@ -62,14 +62,14 @@ def generate_and_validate_lesson(
     language: str,
     known_lemmas: set,
     target_lemmas: list,
-    min_target_occurrences: int = 2,
+    min_target_occurrences: int = 1,
+    min_coverage_pct: float = 95.0,
     model_id: str = DEFAULT_MODEL,
-    max_repair_attempts: int = 2,
+    max_repair_attempts: int = 1,
 ) -> tuple[str, str | None, dict, int, str]:
     """
-    Generuje lekcje i automatycznie naprawia ja, jesli walidacja wykryje
-    naruszenia - wysyla liste bledow z powrotem do modelu i prosi o
-    przepisanie (do max_repair_attempts razy).
+    Generuje lekcje i w razie potrzeby wykonuje 1 probe poprawki,
+    jesli pokrycie leksykalne tekstu jest ponizej progu i+1 (np. 95%).
 
     Zwraca (oczyszczony_tekst, wybrane_miejsce_lub_None, wynik_walidacji,
     ile_naprawek_wykonano, uzyty_model).
@@ -79,7 +79,11 @@ def generate_and_validate_lesson(
 
     raw_text, used_model = generate_lesson_text(api_key, prompt, model_id=model_id)
     cleaned_text, setting_name = extract_setting_from_text(raw_text)
-    result = validate_generated_text(cleaned_text, language, known_lemmas, target_lemmas, min_target_occurrences)
+    result = validate_generated_text(
+        cleaned_text, language, known_lemmas, target_lemmas,
+        min_target_occurrences=min_target_occurrences,
+        min_coverage_pct=min_coverage_pct,
+    )
     attempts_used = 0
 
     while not result["ok"] and attempts_used < max_repair_attempts:
@@ -89,7 +93,11 @@ def generate_and_validate_lesson(
         try:
             raw_text, used_model = generate_lesson_text(api_key, fix_prompt, model_id=used_model)
             cleaned_text, setting_name = extract_setting_from_text(raw_text)
-            result = validate_generated_text(cleaned_text, language, known_lemmas, target_lemmas, min_target_occurrences)
+            result = validate_generated_text(
+                cleaned_text, language, known_lemmas, target_lemmas,
+                min_target_occurrences=min_target_occurrences,
+                min_coverage_pct=min_coverage_pct,
+            )
             attempts_used += 1
         except Exception:
             break
