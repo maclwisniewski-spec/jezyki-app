@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# Streamlit secrets (nigdy nie commituj sekretow do repozytorium!)
+.streamlit/secrets.toml
+
+# Bazy danych SQLite
+*.db
+
+# Pliki sesyjne / tymczasowe CLI
+session_*.json
+theme_state_*.json
+prompt_*.txt
+response_*.txt
+_diag.py
+
+# System
+.DS_Store
+Thumbs.db
