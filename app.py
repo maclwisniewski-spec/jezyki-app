@@ -685,3 +685,54 @@ with tab_vocab:
                 mime="application/x-sqlite3",
                 use_container_width=True,
             )
+
+    st.markdown("---")
+    st.subheader("✨ Lista slow do wklejenia w Gemini Gem")
+    st.caption(
+        "Wygeneruj aktualna liste (znane + w trakcie nauki + kolejne nowe wg "
+        "popularnosci) i wklej ja razem z komenda 'wygeneruj' do Twojego Gema."
+    )
+
+    n_new_gem = st.slider("Ile nowych slow do wprowadzenia:", min_value=10, max_value=100, value=40, step=5)
+
+    if st.button("🔄 Przygotuj liste dla Gemini", use_container_width=True):
+        with st.spinner("Pobieranie slow w trakcie nauki z LingQ i wybor nowych slow..."):
+            api_key_for_export = get_lingq_api_key()
+            in_progress_lemmas_export: set[str] = set()
+            if api_key_for_export:
+                try:
+                    in_progress_list = get_in_progress_lemmas(
+                        api_key_for_export, selected_lang, selected_lang,
+                        exclude_lemmas=known_lemmas, n=len(known_lemmas) + 5000,
+                    )
+                    in_progress_lemmas_export = set(in_progress_list)
+                except Exception as e:
+                    st.warning(f"Nie udalo sie pobrac slow w trakcie nauki (uzyto tylko known_words): {e}")
+
+            src_export = WordfreqSource(selected_lang)
+            next_unknown_export = pick_next_unknown_words(
+                src_export, known_lemmas | in_progress_lemmas_export, selected_lang, n=n_new_gem,
+            )
+
+            gem_text = (
+                f"ZNANE SLOWA (mozesz uzywac zupelnie swobodnie, {len(known_lemmas)} lematow):\n"
+                + ", ".join(sorted(known_lemmas))
+                + f"\n\nSLOWA W TRAKCIE NAUKI (mozesz uzywac swobodnie, {len(in_progress_lemmas_export)} lematow):\n"
+                + ", ".join(sorted(in_progress_lemmas_export))
+                + f"\n\nNOWE SLOWA DO WPROWADZENIA (posortowane od najpopularniejszych - "
+                f"zaczynaj od poczatku listy, min. 20% tekstu z tej listy):\n"
+                + ", ".join(next_unknown_export)
+            )
+            st.session_state[f"gem_text_{selected_lang}"] = gem_text
+
+    gem_key = f"gem_text_{selected_lang}"
+    if gem_key in st.session_state:
+        st.code(st.session_state[gem_key], language=None, wrap_lines=True)
+        st.download_button(
+            label=f"💾 Pobierz liste jako plik .txt",
+            data=st.session_state[gem_key].encode("utf-8"),
+            file_name=f"slowa_dla_gemini_{selected_lang}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+
