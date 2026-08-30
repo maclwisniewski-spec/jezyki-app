@@ -79,16 +79,27 @@ def pick_next_unknown_words(
     n: int = 8,
     scan_limit: int = 20000,
 ) -> list[str]:
-    """Zwraca pierwsze n NIEZNANYCH slow, idac od najczestszych w dol rankingu."""
-    from lemmatize import lemmatize_words_batch
+    """
+    Zwraca pierwsze n NIEZNANYCH slow, idac od najczestszych w dol rankingu.
+
+    Odfiltrowuje PROPN (nazwy wlasne: miasta, partie, kraje - np. "München",
+    "USA", "SPD"), X (skroty typu "ca.", "ok") i NUM (liczebniki typu "II") -
+    to nie jest generalizowalne slownictwo do nauki, a wymuszanie ich w
+    generowanym tekscie brzmi nienaturalnie.
+    """
+    from lemmatize import lemmatize_words_batch_with_pos
+
+    EXCLUDED_POS = {"PROPN", "X", "NUM"}
 
     candidates = [w for w in source.ranked_words(scan_limit) if w.isalpha() and len(w) > 1]
-    lemma_map = lemmatize_words_batch(candidates, language)
+    lemma_pos_map = lemmatize_words_batch_with_pos(candidates, language)
 
     found: list[str] = []
     seen: set[str] = set()
     for w in candidates:
-        lemma = lemma_map[w]
+        lemma, pos = lemma_pos_map[w]
+        if pos in EXCLUDED_POS:
+            continue
         if lemma in known_lemmas or lemma in seen:
             continue
         seen.add(lemma)

@@ -65,3 +65,22 @@ def lemmatize_words_batch(words: list[str], language: str) -> dict[str, str]:
         tokens = [t for t in doc if not t.is_punct and not t.is_space]
         out[word] = tokens[0].lemma_.lower() if tokens else word.lower()
     return out
+
+
+def lemmatize_words_batch_with_pos(words: list[str], language: str) -> dict[str, tuple[str, str]]:
+    """
+    Jak lemmatize_words_batch(), ale zwraca tez POS: {slowo: (lemat, pos)}.
+    Uzywane do odfiltrowania nazw wlasnych/skrotow (PROPN, X) i liczebnikow
+    (NUM) z listy "nowych slow do nauki" - to nie jest generalizowalne
+    slownictwo (np. "München", "USA", "SPD", "ca.", "II"), wiec ich
+    wymuszanie w tekscie brzmi nienaturalnie.
+    """
+    nlp = _get_nlp(language)
+    out: dict[str, tuple[str, str]] = {}
+    for word, doc in zip(words, nlp.pipe(words, batch_size=256)):
+        tokens = [t for t in doc if not t.is_punct and not t.is_space]
+        if tokens:
+            out[word] = (tokens[0].lemma_.lower(), tokens[0].pos_)
+        else:
+            out[word] = (word.lower(), "X")
+    return out
