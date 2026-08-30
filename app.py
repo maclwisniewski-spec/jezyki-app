@@ -12,9 +12,15 @@ import os
 import random
 import re
 import sqlite3
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+# Gwarancja dostepnosci modulow lokalnych na Streamlit Cloud
+BASE_DIR = Path(__file__).parent.resolve()
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 import streamlit as st
 
@@ -221,6 +227,13 @@ with st.sidebar.expander("✨ Automatyczne generowanie (Gemini)", expanded=False
         if gemini_input != st.session_state.get("custom_gemini_api_key", ""):
             st.session_state["custom_gemini_api_key"] = gemini_input
 
+    selected_gemini_model = st.selectbox(
+        "Model Gemini:",
+        options=["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.1-flash-lite"],
+        index=0,
+        help="gemini-3.6-flash jest domyslnym, najszybszym i stabilnym modelem z bezplatnym Free Tier w AI Studio.",
+    )
+
     gemini_key_available = bool(get_gemini_api_key())
     st.caption(
         "✅ Klucz ustawiony - dostepny przycisk automatycznego generowania."
@@ -317,8 +330,8 @@ with tab_gen:
         col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
         
         with col_cfg1:
-            n_target = st.slider("Liczba nowych slow (target words):", min_value=3, max_value=15, value=8)
-            min_occ = st.slider("Min. powtorzen per target word:", min_value=1, max_value=4, value=2)
+            n_target = st.slider("Liczba nowych slow (target words):", min_value=3, max_value=15, value=6)
+            min_occ = st.slider("Min. powtorzen per target word:", min_value=1, max_value=4, value=1)
             
         with col_cfg2:
             length_hint = st.selectbox(
@@ -326,12 +339,17 @@ with tab_gen:
                 ["500-800 slow", "800-1200 slow", "1200-1500 slow", "1500-2000 slow"],
                 index=0,
             )
+            min_cov = st.slider(
+                "Wymagane pokrycie i+1 (%):",
+                min_value=85, max_value=100, value=95,
+                help="Standard leksykalny (Nation 2006): 95-98% znanych slow zapewnia pelne zrozumienie fabuly i optymalna nauke nowych slow bez zagladania do slownika.",
+            )
+            
+        with col_cfg3:
             serial_mode = st.checkbox(
                 "Tryb serialu (Maciek i Damian, thriller)", value=True,
                 help="Wylacz, zeby wrocic do prostego, niefabularnego cwiczenia i+1.",
             )
-
-        with col_cfg3:
             continue_story = st.checkbox("Kontynuuj poprzednia historie", value=True)
             prev_context = get_previous_context(selected_lang) if continue_story else None
             if prev_context:
@@ -427,20 +445,32 @@ with tab_gen:
                 st.session_state[f"prompt_{selected_lang}"] = prompt
                 st.session_state[f"target_lemmas_{selected_lang}"] = target_lemmas
                 st.session_state[f"min_occ_{selected_lang}"] = min_occ
+                st.session_state[f"min_cov_{selected_lang}"] = min_cov
                 st.session_state[f"chosen_topic_{selected_lang}"] = chosen_topic
 
             if generate_auto_clicked:
                 gemini_key = get_gemini_api_key()
                 with st.spinner("Gemini pisze i w razie potrzeby poprawia odcinek (moze to potrwac do minuty)..."):
                     try:
-                        from gemini_client import generate_and_validate_lesson
-                        cleaned_text, extracted_setting, auto_result, repairs = generate_and_validate_lesson(
+                        import gemini_client
+                        import importlib
+                        importlib.reload(gemini_client)
+                        gen_output = gemini_client.generate_and_validate_lesson(
                             gemini_key, prompt, selected_lang, known_lemmas, target_lemmas,
                             min_target_occurrences=min_occ,
+                            min_coverage_pct=float(min_cov),
+                            model_id=selected_gemini_model,
                         )
+                        if len(gen_output) == 5:
+                            cleaned_text, extracted_setting, auto_result, repairs, used_model = gen_output
+                        else:
+                            cleaned_text, extracted_setting, auto_result, repairs = gen_output
+                            used_model = selected_gemini_model
                         st.session_state[f"response_area_{selected_lang}"] = cleaned_text
                         st.session_state[f"extracted_setting_{selected_lang}"] = extracted_setting
                         st.session_state[f"auto_validate_{selected_lang}"] = True
+                        if used_model != selected_gemini_model:
+                            st.info(f"Model {selected_gemini_model} byl przeciazony - automatycznie uzyto {used_model}.")
                         if extracted_setting:
                             st.caption(f"Miejsce akcji wybrane przez model: **{extracted_setting}**")
                         if repairs > 0:
@@ -494,7 +524,8 @@ with tab_gen:
             st.error("Wklej tekst odpowiedzi modelu przed uruchomieniem walidacji.")
         else:
             targets = st.session_state.get(f"target_lemmas_{selected_lang}", [])
-            min_o = st.session_state.get(f"min_occ_{selected_lang}", 2)
+            min_o = st.session_state.get(f"min_occ_{selected_lang}", 1)
+            min_c = st.session_state.get(f"min_cov_{selected_lang}", 95)
 
             # Wyciagnij "MIEJSCE_AKCJI: ..." jesli jest (np. z recznie wklejonej
             # odpowiedzi z innego modelu) - inaczej ta linia falszywie zaliczylaby
@@ -509,14 +540,23 @@ with tab_gen:
                     allowed_lemmas=known_lemmas,
                     target_lemmas=targets,
                     min_target_occurrences=min_o,
+                    min_coverage_pct=float(min_c),
                 )
                 
                 # Zapisanie wyniku do session_state
                 st.session_state[f"val_res_{selected_lang}"] = val_res
 
+            # Prezentacja metryk i+1
+            st.markdown("---")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            cov_status = "✅ Poziom i+1" if val_res["token_coverage"] >= min_c else "⚠️ Ponizej progu"
+            col_m1.metric("🎯 Pokrycie leksykalne", f"{val_res['token_coverage']}%", cov_status)
+            col_m2.metric("📖 Slowa ze slownika", f"{val_res['known_content_tokens']}/{val_res['total_content_tokens']}")
+            col_m3.metric("✨ Target words w uzyciu", f"{val_res['used_targets_count']}/{val_res['total_targets_count']}")
+
             # Prezentacja wynikow walidacji
             if val_res["ok"]:
-                st.success("✅ Tekst w 100% zgodny z ograniczeniami leksykalnymi i+1!")
+                st.success(f"✅ Lekcja zaliczona! Pokrycie tekstu wynosi **{val_res['token_coverage']}%** (prog i+1: {min_c}%). Tekst zostal automatycznie zapisany.")
                 conn = connect(str(get_db_path(selected_lang)))
                 save_text(conn, selected_lang, cleaned_response, targets, setting=final_setting)
                 
@@ -525,14 +565,28 @@ with tab_gen:
                 cov = text_coverage(text_lemmas, known_lemmas | set(targets))
                 log_coverage(conn, selected_lang, cov["token_coverage"], cov["type_coverage"], sample_size=cov["sample_size"])
                 conn.close()
-                
-                st.info("💾 Tekst zostal pomyslnie zapisany w bazie historii. Kolejna lekcja bedzie kontynuowac te fabule.")
+
+                if val_res["violations"]:
+                    with st.expander(f"💡 Slowa wplecione naturalnie przez model ({len(val_res['violations'])}):"):
+                        st.caption("Te slowa pojawily sie w tekscie, ale nie zaburzyly zrozumienia fabuly:")
+                        st.write(", ".join(sorted(val_res["violations"].keys())))
+                        if st.button("➕ Dodaj te slowa do bazy znanych slow (known_words)", key=f"add_words_{selected_lang}"):
+                            new_words = list(val_res["violations"].keys())
+                            kw_file = BASE_DIR / f"known_words_{selected_lang}.json"
+                            existing = []
+                            if kw_file.exists():
+                                existing = json.loads(kw_file.read_text(encoding="utf-8"))
+                            updated = sorted(list(set(existing) | set(new_words)))
+                            kw_file.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+                            st.cache_data.clear()
+                            st.success(f"Dodano {len(new_words)} slow do bazy! Baza liczy teraz {len(updated)} slow.")
+                            st.rerun()
             else:
-                st.error("❌ Tekst zawiera naruszenia ograniczen leksykalnych.")
+                st.warning(f"⚠️ Pokrycie leksykalne ({val_res['token_coverage']}%) jest ponizej wymaganego progu {min_c}% lub pominieto target words.")
                 
                 col_res1, col_res2 = st.columns(2)
                 with col_res1:
-                    st.markdown("#### Niedozwolone slowa (spoza listy znanych i target):")
+                    st.markdown("#### Slowa spoza listy znanych i target:")
                     if val_res["violations"]:
                         v_data = [{"Slowo/Lemat": k, "Liczba uzyc": v} for k, v in val_res["violations"].items()]
                         st.dataframe(v_data, use_container_width=True)
